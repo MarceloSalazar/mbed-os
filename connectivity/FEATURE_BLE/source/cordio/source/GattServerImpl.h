@@ -282,6 +282,14 @@ private:
 
     bool is_update_authorized(connection_handle_t connection, GattAttribute::Handle_t value_handle);
 
+    attribute_handle_t get_pending_indication_attribute(connection_handle_t connection);
+
+    bool set_pending_indication(connection_handle_t connection, attribute_handle_t attribute);
+
+    void clear_pending_indication(connection_handle_t connection, attribute_handle_t attribute);
+
+    void reset_pending_indications();
+
     struct alloc_block_t {
         alloc_block_t *next;
         uint8_t data[1];
@@ -385,6 +393,10 @@ private:
     uint16_t currentHandle;
 
     bool default_services_added;
+    struct {
+        connection_handle_t connection = HCI_HANDLE_NONE;
+        attribute_handle_t attribute;
+    } indication_queue[DM_CONN_MAX];
 };
 
 } // namespace impl

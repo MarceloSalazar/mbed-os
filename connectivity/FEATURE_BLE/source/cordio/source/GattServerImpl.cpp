@@ -720,8 +720,17 @@ ble_error_t GattServer::write(
                     updates_sent++;
                 }
                 if (cccd_config & ATT_CLIENT_CFG_INDICATE) {
-                    AttsHandleValueInd(conn_id, att_handle, len, (uint8_t *) buffer);
-                    updates_sent++;
+                    if (!get_pending_indication_attribute(conn_id)) {
+                        set_pending_indication(conn_id, att_handle);
+                        AttsHandleValueInd(conn_id, att_handle, len, (uint8_t *) buffer);
+                        updates_sent++;
+                    } else {
+                        // FIXME: returning an error would break the flow.
+                        // the API requires bigger changes, it doesn't make any 
+                        // sense to send the notification and indication or even storing 
+                        // it locally if the only thing wanted is send an indication or 
+                        // notification.
+                    }
                 }
             }
         }
@@ -773,8 +782,17 @@ ble_error_t GattServer::write(
             updates_sent++;
         }
         if (cccEnabled & ATT_CLIENT_CFG_INDICATE) {
-            AttsHandleValueInd(connection, att_handle, len, (uint8_t *) buffer);
-            updates_sent++;
+            if (!get_pending_indication_attribute(connection)) {
+                set_pending_indication(connection, att_handle);
+                AttsHandleValueInd(connection, att_handle, len, (uint8_t *) buffer);
+                updates_sent++;
+            } else {
+                // FIXME: returning an error would break the flow.
+                // the API requires bigger changes, it doesn't make any 
+                // sense to send the notification and indication or even storing 
+                // it locally if the only thing wanted is send an indication or 
+                // notification.
+            }
         }
     }
 #endif // BLE_FEATURE_SECURITY
@@ -945,6 +963,8 @@ ble_error_t GattServer::reset(ble::GattServer* server)
 
     AttsCccRegister(cccd_cnt, (attsCccSet_t *) cccds, cccd_cb);
 
+    reset_pending_indications();
+
     return BLE_ERROR_NONE;
 }
 
@@ -966,7 +986,17 @@ void GattServer::att_cb(const attEvt_t *evt)
             handler->onAttMtuChange(evt->hdr.param, evt->mtu);
         }
     } else if (evt->hdr.status == ATT_SUCCESS && evt->hdr.event == ATTS_HANDLE_VALUE_CNF) {
-        getInstance().handleEvent(GattServerEvents::GATT_EVENT_DATA_SENT, evt->hdr.param, evt->handle);
+        auto& self = getInstance();
+        connection_handle_t connection = evt->hdr.param;
+        attribute_handle_t attribute = evt->handle;
+        self.handleEvent(GattServerEvents::GATT_EVENT_DATA_SENT, connection, attribute);
+
+        // If an indication was pending, this is the indication we were expecting.
+        // Remove it from the queue and notify of the confirmation received.
+        if (self.get_pending_indication_attribute(connection) == attribute) {
+            self.clear_pending_indication(connection, attribute);
+            self.handleEvent(GattServerEvents::GATT_EVENT_CONFIRMATION_RECEIVED, connection, attribute);
+        }
     }
 }
 
@@ -1605,6 +1635,50 @@ void GattServer::handleEvent(
 void GattServer::handleDataSentEvent(unsigned count)
 {
     dataSentCallChain.call(count);
+}
+
+attribute_handle_t GattServer::get_pending_indication_attribute(connection_handle_t connection)
+{
+    for (auto& pending_indication : indication_queue) {
+        if (pending_indication.connection == connection) {
+            return pending_indication.attribute;
+        } 
+    }  
+    return 0;    
+}
+
+bool GattServer::set_pending_indication(connection_handle_t connection, attribute_handle_t attribute)
+{
+    if (get_pending_indication_attribute(connection)) {
+        return false;
+    }
+
+    for (auto& pending_indication : indication_queue) {
+        if (pending_indication.connection == HCI_HANDLE_NONE) {
+            pending_indication.connection = connection;
+            pending_indication.attribute = attribute;
+            return true;
+        } 
+    }  
+    return false;
+}
+
+void GattServer::clear_pending_indication(connection_handle_t connection, attribute_handle_t attribute)
+{
+    for (auto& pending_indication : indication_queue) {
+        if (pending_indication.connection == connection && 
+            pending_indication.attribute == attribute) {
+            pending_indication.connection = HCI_HANDLE_NONE;
+            break;
+        }
+    }    
+}
+
+void GattServer::reset_pending_indications()
+{
+    for (auto& pending_indication : indication_queue) {
+        pending_indication.connection = HCI_HANDLE_NONE;
+    }
 }
 
 } // namespace impl
