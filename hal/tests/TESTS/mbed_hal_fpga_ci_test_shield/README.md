@@ -5,8 +5,10 @@
 ![30% center](fpga_test_shield.jpg)
 
 ```
-mbed test -n hal-tests-tests*fpga* --app-config TESTS/configs/fpga.json
+mbed test -n "hal-tests-tests*fpga*" --app-config TESTS/configs/fpga.json
 ```
+
+The `FPGA_FORCE_ALL_PORTS` macro can be defined to force all peripherals to be tested. Some FPGA tests only test one by default, to save time.
 
 FPGA_CI_TEST_SHIELD needed macro  
 and specific test capabilities per target  
